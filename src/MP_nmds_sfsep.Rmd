@@ -1,0 +1,348 @@
+---
+title: "MP_nmds_sfsep"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+```{r}
+ipak <- function(pkg){
+    new.pkg <- pkg[!(pkg %in% installed.packages()[, "Package"])]
+    if (length(new.pkg)) 
+        install.packages(new.pkg, dependencies = TRUE)
+    sapply(pkg, require, character.only = TRUE)
+}
+
+packgs <- c("dplyr", "vegan", "ggplot2", "compare", "ade4", "adespatial", "gclus", "dendextend", "here", "cowplot", "ggpubr", "erer")
+
+ipak(packgs)
+```
+
+
+```{r message=FALSE}
+require(dplyr)
+require(vegan)
+require(ggplot2)
+require(compare)
+library(ade4)
+library(adespatial)
+library(gclus)
+library(dendextend)
+library(here)
+library(cowplot)
+library(ggpubr)
+library(erer)
+```
+```{r}
+dr_here()
+```
+###Define function for running NMDS on Hellinger-transformed data, with Jaccard distance
+```{r}
+mp_nmds <- function(x) {metaMDS(decostand(t(x), method = "hellinger"), distance = "jaccard")}
+```
+
+```{r}
+source("nmdsplot.R")
+```
+
+
+###Define plotting function for plotting NMDS
+```{r}
+nmdsplot <- function(x) {ggplot(data = x, mapping = aes(x = nmds_axis1, y = nmds_axis2)) +
+  geom_point(mapping = aes(color = Cruise, shape = depthbin)) +
+    xlim(-1.8,1.8)+
+    ylim(-1.25, 1.25)+
+    rremove("legend")} 
+```
+
+
+###Read OTU table with all the size fractions
+```{r}
+otutab_sfsep <- read.table(here("data", "OTUtab_nozooembr_minsize5_prop_wtax_wnewseqid_14032019_point.txt"), header = T, sep = "\t")
+```
+
+###Read in size fraction sample names:
+```{r}
+pico <- readLines(here("data","pico_descnames.txt"))
+three10 <- readLines(here("data","three10_descnames.txt"))
+three180 <- readLines(here("data","three180_descnames.txt"))
+ten50 <- readLines(here("data","ten50_descnames.txt"))
+fifty200 <- readLines(here("data","fifty200_descnames.txt"))
+net_all <- readLines(here("data","net_all_descnames.txt"))
+sfnames <- list("0.4-3" = pico, "3-10" = three10)
+#write.list(sfnames, "sfnames.txt", t.name = c("0.4-3", "3-10"), row.names = F)
+```
+
+###Read metadata table. Contains also test stations.
+```{r}
+#Metadata
+meta_table <- read.table(here("data", "MP_CB_profiles_20170802_wsampnames.txt"), header = T, sep = "\t", fill = NA)
+
+meta_table["sf0.4-3"]
+
+#str(meta_table)
+
+meta_table$sampleID2 <- gsub("m", "", meta_table$sampleID)
+
+meta_table$sampleID_pico <- paste(meta_table$sampleID2, "_0.4.3", sep = "")
+meta_table$sampleID_three10 <- paste(meta_table$sampleID2, "_3.10", sep = "")
+meta_table$sampleID_ten50 <- paste(meta_table$sampleID2, "_10.50", sep = "")
+meta_table$sampleID_fifty200 <- paste(meta_table$sampleID2, "_50.200", sep = "")
+meta_table$sampleID_three180 <- paste(meta_table$sampleID2, "_3.180", sep = "")
+
+#write.table(meta_table, file = "MP_CB_profiles_20170802_wsampnames.txt", sep = "\t")
+```
+
+```{r}
+rm(OTUtab_pico)
+otutab_pico <- otutab_sfsep[,pico]
+#str(otutab_pico)
+```
+
+###Create meta data table for nmds_pico. Select the rows (samples) that have the pico-fraction
+```{r}
+meta_sf_nmds1_pico <- meta_table[match(colnames(otutab_pico),meta_table$sf0.4.3),]
+
+meta_sf_nmds1_pico <- droplevels(meta_sf_nmds1_pico)
+
+str(meta_sf_nmds1_pico)
+```
+
+###Run NMDS on the pico-samples
+```{r}
+pico_nmds_hell_jac <- metaMDS(decostand(t(otutab_pico), method = "hell"), distance = "jaccard") #Stress 0.12
+pico_nmds_jac <- metaMDS(t(otutab_pico), distance = "jaccard") #Stress 0.13
+pico_nmds_bray <- metaMDS(t(otutab_pico), distance = "bray") #Stress 0.13
+
+pico_prot1 <- protest(pico_nmds_hell_jac, pico_nmds_jac)
+pico_prot1
+plot(pico_prot1) #Correlation 0.99
+
+pico_prot2 <- protest(pico_nmds_bray, pico_nmds_jac)
+pico_prot2
+plot(pico_prot2) #Correlation 1
+
+
+permmp1 <- how(nperm = 999)
+setBlocks(permmp1) <- with(meta_sf_nmds1_pico[c(1:8),], depthbin)
+adonis2(t(otutab_pico[,c(1:8)]) ~ Station, data = meta_sf_nmds1_pico[c(1:8),], permutations = permmp1)
+#p = 0.06
+
+permmp1st <- how(nperm = 999)
+setBlocks(permmp1st) <- with(meta_sf_nmds1_pico[c(1:8),], Station)
+adonis2(t(otutab_pico[,c(1:8)]) ~ depthbin, data = meta_sf_nmds1_pico[c(1:8),], permutations = permmp1st)
+#nope
+
+adonis2(t(otutab_pico[,c(1:8)]) ~ depthbin, data = meta_sf_nmds1_pico[c(1:8),])
+
+permmp2 <- how(nperm = 999)
+setBlocks(permmp2) <- with(meta_sf_nmds1_pico[c(9:18),], depthbin)
+adonis2(t(otutab_pico[,c(9:18)]) ~ Station, data = meta_sf_nmds1_pico[c(9:18),], permutations = permmp2)
+#p = 0.3
+
+
+permmp2st <- how(nperm = 999)
+setBlocks(permmp2st) <- with(meta_sf_nmds1_pico[c(9:18),], Station)
+adonis2(t(otutab_pico[,c(9:18)]) ~ depthbin, data = meta_sf_nmds1_pico[c(9:18),], permutations = permmp2st)
+#nope
+
+adonis2(t(otutab_pico[,c(9:18)]) ~ depthbin, data = meta_sf_nmds1_pico[c(9:18),])
+
+permmp3 <- how(nperm = 999)
+setBlocks(permmp3) <- with(meta_sf_nmds1_pico[c(19:28),], depthbin)
+adonmp3 <- adonis2(t(otutab_pico[,c(19:28)]) ~ Station, data = meta_sf_nmds1_pico[c(19:28),], 
+        permutations = permmp3)
+#p = 0.19
+```
+
+###create table for plotting pico_nmds1
+```{r}
+nmds_pico_table <- data.frame(cbind(pico_nmds_hell_jac$points[,1], pico_nmds_hell_jac$points[,2], meta_sf_nmds1_pico))
+
+#names(nmds5_plot)
+names(nmds_pico_table)[c(1,2)] <- c("nmds_axis1", "nmds_axis2")
+```
+
+###Plot pico_nmds1
+```{r}
+nmds_pico_plot <- nmdsplot(nmds_pico_table) +
+  geom_text(mapping = aes(label = as.character(Station)), size = 2)
+nmds_pico_plot
+  #ggtitle("NMDS of pico fraction, proportional abundance")
+```
+
+###Since diatoms are not pico-planktonic, diatom reads in the pico fraction are likely due to DNA from burst cells. We check if it makes any difference to remove the diatom OTUs.
+```{r}
+names(otutab_sfsep)
+levels(otutab_sfsep$Classt)
+
+otutab_pico_wobacill <- otutab_sfsep %>% filter(!Classt %in% "Bacillariophyta") %>% select(pico)
+
+#str(otutab_pico_wobacill)
+dim(otutab_pico_wobacill)
+dim(otutab_pico)
+```
+```{r}
+pico_nmds_wobacill <- metaMDS(decostand(t(otutab_pico_wobacill), method = "hellinger"), distance = "jaccard") #Stress 0.12
+
+pico_prot3 <- protest(pico_nmds_hell_jac, pico_nmds_wobacill)
+pico_prot3
+plot(pico_prot3) #Correlation 1, i.e. makes no difference to remove diatom OTUs from pico-fraction
+```
+
+###Three-10
+```{r}
+rm(OTUtab_three10)
+otutab_three10 <- otutab_sfsep[,three10]
+#str(otutab_three10)
+```
+
+###Create meta data table for three10:
+```{r}
+meta_sf_nmds_three10 <- meta_table[match(colnames(otutab_three10),meta_table$sampleID_three10),]
+
+meta_sf_nmds_three10 <- droplevels(meta_sf_nmds_three10)
+
+#str(meta_sf_nmds1_three10)
+
+#which(meta_table$sampleID_three10 %in% colnames(otutab_three10))
+```
+
+```{r}
+three10_nmds <- mp_nmds(otutab_three10)
+```
+
+###create table for plotting three10_nmds
+```{r}
+nmds_three10_table <- data.frame(cbind(three10_nmds$points[,1], three10_nmds$points[,2], meta_sf_nmds_three10))
+
+#names(nmds5_plot)
+names(nmds_three10_table)[c(1,2)] <- c("nmds_axis1", "nmds_axis2")
+```
+
+###Plot three10_nmds
+```{r}
+nmds_three10_plot <- nmdsplot(nmds_three10_table) #+
+  #ggtitle("NMDS of three10 fraction, proportional abundance")
+```
+
+###Ten-50
+```{r}
+rm(OTUtab_ten50)
+otutab_ten50 <- otutab_sfsep[,ten50]
+#str(otutab_ten50)
+```
+
+###Create meta data table:
+```{r}
+meta_sf_nmds_ten50 <- meta_table[match(colnames(otutab_ten50),meta_table$sampleID_ten50),]
+
+meta_sf_nmds_ten50 <- droplevels(meta_sf_nmds_ten50)
+
+#str(meta_sf_nmds_ten50)
+
+#which(meta_table$sampleID_ten50 %in% colnames(otutab_ten50))
+```
+
+```{r}
+ten50_nmds <- mp_nmds(otutab_ten50)
+```
+
+###create table for plotting ten50_nmds
+```{r}
+nmds_ten50_table <- data.frame(cbind(ten50_nmds$points[,1], ten50_nmds$points[,2], meta_sf_nmds_ten50))
+
+#names(nmds5_plot)
+names(nmds_ten50_table)[c(1,2)] <- c("nmds_axis1", "nmds_axis2")
+```
+
+###Plot ten50_nmds
+```{r}
+nmds_ten50_plot <- nmdsplot(nmds_ten50_table) #+
+  #ggtitle("NMDS of ten50 fraction, proportional abundance")
+```
+
+###Fifty200
+```{r}
+rm(OTUtab_fifty200)
+otutab_fifty200 <- otutab_sfsep[,fifty200]
+#str(otutab_fifty200)
+```
+
+###Create meta data table:
+```{r}
+meta_sf_nmds_fifty200 <- meta_table[match(colnames(otutab_fifty200),meta_table$sampleID_fifty200),]
+
+meta_sf_nmds_fifty200 <- droplevels(meta_sf_nmds_fifty200)
+
+#str(meta_sf_nmds_fifty200)
+
+#which(meta_table$sampleID_fifty200 %in% colnames(otutab_fifty200))
+```
+
+```{r}
+fifty200_nmds <- mp_nmds(otutab_fifty200)
+```
+
+###create table for plotting fifty200_nmds
+```{r}
+nmds_fifty200_table <- data.frame(cbind(fifty200_nmds$points[,1], fifty200_nmds$points[,2], meta_sf_nmds_fifty200))
+
+#names(nmds5_plot)
+names(nmds_fifty200_table)[c(1,2)] <- c("nmds_axis1", "nmds_axis2")
+```
+
+###Plot fifty200_nmds
+```{r}
+nmds_fifty200_plot <- nmdsplot(nmds_fifty200_table) #+
+  #ggtitle("NMDS of fifty200 fraction, proportional abundance")
+```
+
+###three180
+```{r}
+rm(OTUtab_three180)
+otutab_three180 <- otutab_sfsep[,three180]
+#str(otutab_three180)
+```
+
+###Create meta data table:
+```{r}
+meta_sf_nmds_three180 <- meta_table[match(colnames(otutab_three180),meta_table$sampleID_three180),]
+
+meta_sf_nmds_three180 <- droplevels(meta_sf_nmds_three180)
+
+#str(meta_sf_nmds_three180)
+
+#which(meta_table$sampleID_three180 %in% colnames(otutab_three180))
+```
+
+```{r}
+three180_nmds <- mp_nmds(otutab_three180)
+```
+
+###create table for plotting three180_nmds
+```{r}
+nmds_three180_table <- data.frame(cbind(three180_nmds$points[,1], three180_nmds$points[,2], meta_sf_nmds_three180))
+
+#names(nmds5_plot)
+names(nmds_three180_table)[c(1,2)] <- c("nmds_axis1", "nmds_axis2")
+```
+
+###Plot three180_nmds
+```{r}
+nmds_three180_plot <- nmdsplot(nmds_three180_table) #+
+  #ggtitle("NMDS of three180 fraction, proportional abundance")
+```
+
+```{r}
+ggarrange(nmds_pico_plot + rremove("xlab") + rremove("ylab"), nmds_three180_plot+ rremove("xlab") + rremove("ylab"), nmds_three10_plot+ rremove("xlab") + rremove("ylab"), nmds_ten50_plot+ rremove("xlab") + rremove("ylab"), nmds_fifty200_plot+ rremove("xlab") + rremove("ylab"), 
+          labels = c("A", "B", "C", "D", "E"),
+          ncol = 2, nrow = 3)
+```
+
